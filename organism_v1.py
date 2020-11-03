@@ -233,7 +233,7 @@ def simulate(settings, organisms, foods, gen):
 
     if settings['plot']==True and gen==settings['gens']-1:
         writer, fig, ax = init_movie()
-        with writer.saving(fig, "writer_test.mp4", 100):
+        with writer.saving(fig, "evolution_hustle.mp4", 100):
             #--- CYCLE THROUGH EACH TIME STEP ---------------------+
             for t_step in range(0, total_time_steps, 1):
                 # PLOT SIMULATION FRAME
