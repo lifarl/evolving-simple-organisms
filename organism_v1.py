@@ -14,6 +14,7 @@ from collections import defaultdict
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle
 import matplotlib.lines as lines
+import matplotlib.animation as manimation
 
 from plotting import plot_food
 from plotting import plot_organism
@@ -40,7 +41,7 @@ settings = {}
 # EVOLUTION SETTINGS
 settings['pop_size'] = 50       # number of organisms
 settings['food_num'] = 100      # number of food particles
-settings['gens'] = 50           # number of generations
+settings['gens'] = 10          # number of generations
 settings['elitism'] = 0.20      # elitism (selection bias)
 settings['mutate'] = 0.10       # mutation rate
 
@@ -56,7 +57,7 @@ settings['x_max'] =  2.0        # arena eastern border
 settings['y_min'] = -2.0        # arena southern border
 settings['y_max'] =  2.0        # arena northern border
 
-settings['plot'] = False        # plot final generation?
+settings['plot'] = True        # plot final generation?
 
 # ORGANISM NEURAL NET SETTINGS
 settings['inodes'] = 1          # number of input nodes
@@ -77,9 +78,7 @@ def calc_heading(org, food):
     return theta_d / 180
 
 
-def plot_frame(settings, organisms, foods, gen, time):
-    fig, ax = plt.subplots()
-    fig.set_size_inches(9.6, 5.4)
+def plot_frame(settings, organisms, foods, gen, time, ax, writer):
 
     plt.xlim([settings['x_min'] + settings['x_min'] * 0.25, settings['x_max'] + settings['x_max'] * 0.25])
     plt.ylim([settings['y_min'] + settings['y_min'] * 0.25, settings['y_max'] + settings['y_max'] * 0.25])
@@ -92,17 +91,17 @@ def plot_frame(settings, organisms, foods, gen, time):
     for food in foods:
         plot_food(food.x, food.y, ax)
 
-    # MISC PLOT SETTINGS
-    ax.set_aspect('equal')
-    frame = plt.gca()
-    frame.axes.get_xaxis().set_ticks([])
-    frame.axes.get_yaxis().set_ticks([])
+    # PLOT  LEGEND
+    figtext_gen = plt.figtext(0.025, 0.95,r'GENERATION: '+str(gen))
+    figtext_step = plt.figtext(0.025, 0.90,r'T_STEP: '+str(time))
 
-    plt.figtext(0.025, 0.95,r'GENERATION: '+str(gen))
-    plt.figtext(0.025, 0.90,r'T_STEP: '+str(time))
+    # GRAB FRAME
+    writer.grab_frame()
 
-    plt.savefig(str(gen)+'-'+str(time)+'.png', dpi=100)
-##    plt.show()
+    # CLEAR FOR NEXT FRAME
+    plt.gcf().texts.remove(figtext_gen)
+    plt.gcf().texts.remove(figtext_step)
+    ax.clear()
 
 
 def evolve(settings, organisms_old, gen):
@@ -172,53 +171,78 @@ def evolve(settings, organisms_old, gen):
 
     return organisms_new, stats
 
+def init_movie():
+    FFMpegWriter = manimation.writers['ffmpeg']
+    metadata = dict(title='Movie Test', artist='Matplotlib',
+                    comment='Movie support!')
+    writer = FFMpegWriter(fps=15, metadata=metadata)
+    fig, ax = plt.subplots()
+    ax.set_aspect('equal')
+    fig.set_size_inches(9.6, 5.4)
+
+    # MISC PLOT SETTINGS
+    frame = plt.gca()
+    frame.axes.get_xaxis().set_ticks([])
+    frame.axes.get_yaxis().set_ticks([])
+
+    return writer, fig, ax
+
+def simulate_step(settings, organisms, foods, gen):
+    # UPDATE FITNESS FUNCTION
+    for food in foods:
+        for org in organisms:
+            food_org_dist = dist(org.x, org.y, food.x, food.y)
+
+            # UPDATE FITNESS FUNCTION
+            if food_org_dist <= 0.075:
+                org.fitness += food.energy
+                food.respawn(settings)
+
+            # RESET DISTANCE AND HEADING TO NEAREST FOOD SOURCE
+            org.d_food = 100
+            org.r_food = 0
+
+    # CALCULATE HEADING TO NEAREST FOOD SOURCE
+    for food in foods:
+        for org in organisms:
+
+            # CALCULATE DISTANCE TO SELECTED FOOD PARTICLE
+            food_org_dist = dist(org.x, org.y, food.x, food.y)
+
+            # DETERMINE IF THIS IS THE CLOSEST FOOD PARTICLE
+            if food_org_dist < org.d_food:
+                org.d_food = food_org_dist
+                org.r_food = calc_heading(org, food)
+
+    # GET ORGANISM RESPONSE
+    for org in organisms:
+        org.think()
+
+    # UPDATE ORGANISMS POSITION AND VELOCITY
+    for org in organisms:
+        org.update_r(settings)
+        org.update_vel(settings)
+        org.update_pos(settings)
+    
+    return organisms
+
 
 def simulate(settings, organisms, foods, gen):
 
     total_time_steps = int(settings['gen_time'] / settings['dt'])
 
-    #--- CYCLE THROUGH EACH TIME STEP ---------------------+
-    for t_step in range(0, total_time_steps, 1):
-
-        # PLOT SIMULATION FRAME
-        if settings['plot']==True and gen==settings['gens']-1:
-            plot_frame(settings, organisms, foods, gen, t_step)
-
-        # UPDATE FITNESS FUNCTION
-        for food in foods:
-            for org in organisms:
-                food_org_dist = dist(org.x, org.y, food.x, food.y)
-
-                # UPDATE FITNESS FUNCTION
-                if food_org_dist <= 0.075:
-                    org.fitness += food.energy
-                    food.respawn(settings)
-
-                # RESET DISTANCE AND HEADING TO NEAREST FOOD SOURCE
-                org.d_food = 100
-                org.r_food = 0
-
-        # CALCULATE HEADING TO NEAREST FOOD SOURCE
-        for food in foods:
-            for org in organisms:
-
-                # CALCULATE DISTANCE TO SELECTED FOOD PARTICLE
-                food_org_dist = dist(org.x, org.y, food.x, food.y)
-
-                # DETERMINE IF THIS IS THE CLOSEST FOOD PARTICLE
-                if food_org_dist < org.d_food:
-                    org.d_food = food_org_dist
-                    org.r_food = calc_heading(org, food)
-
-        # GET ORGANISM RESPONSE
-        for org in organisms:
-            org.think()
-
-        # UPDATE ORGANISMS POSITION AND VELOCITY
-        for org in organisms:
-            org.update_r(settings)
-            org.update_vel(settings)
-            org.update_pos(settings)
+    if settings['plot']==True and gen==settings['gens']-1:
+        writer, fig, ax = init_movie()
+        with writer.saving(fig, "writer_test.mp4", 100):
+            #--- CYCLE THROUGH EACH TIME STEP ---------------------+
+            for t_step in range(0, total_time_steps, 1):
+                # PLOT SIMULATION FRAME
+                plot_frame(settings, organisms, foods, gen, t_step, ax, writer)
+                organisms = simulate_step(settings, organisms, foods, gen)
+    else:
+        #--- CYCLE THROUGH EACH TIME STEP ---------------------+
+        for t_step in range(0, total_time_steps, 1):
+            organisms = simulate_step(settings, organisms, foods, gen)
 
     return organisms
 
